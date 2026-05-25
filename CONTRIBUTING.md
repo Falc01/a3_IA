@@ -50,6 +50,7 @@ Abaixo está a divisão de tarefas baseada no planejamento técnico da PoC:
     *   Criar o dashboard web interativo em Streamlit (`frontend/app.py`).
     *   Permitir que o usuário defina o tamanho da matriz, configure a origem, o destino e adicione/remova obstáculos de forma dinâmica e amigável.
     *   Importar o ambiente e o agente PPO, e acionar o treinamento sob demanda, exibindo a barra de progresso, o gráfico de recompensa em tempo real e a rota resultante passo a passo.
+    *   Permitir que o usuario possa mudar os hiperparâmetros do modelo, assim fazendo ele testar o projeto por completo
 *   **Bibliotecas Utilizadas:** `streamlit`, `matplotlib` (para plotagem da grade).
 *   **Responsáveis:**
     *   👤 *Aurea*
