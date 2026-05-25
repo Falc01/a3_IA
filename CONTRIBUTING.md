@@ -24,9 +24,10 @@ Abaixo está a divisão de tarefas baseada no planejamento técnico da PoC:
 
 ### 2. 🧠 Treinamento e IA (Pair Programming)
 *   **Foco e Responsabilidades:**
-    *   Configurar o algoritmo **DQN (Deep Q-Network)**, ideal para mapear estados discretos (coordenadas da matriz) in ações.
-    *   Ajustar hiperparâmetros de treinamento (learning rate, buffer size, exploration fraction) para garantir que a IA convirja rapidamente (em menos de 10-15 segundos) no frontend.
-    *   Desenvolver o script de treinamento (`scripts/train.py`) e garantir o salvamento do modelo em arquivo `.zip`.
+    *   Configurar o algoritmo **PPO (Proximal Policy Optimization)**, ideal para lidar com a variação dinâmica de tamanhos de matrizes e obstáculos configurados via frontend.
+    *   Ajustar os hiperparâmetros do PPO (taxa de aprendizado, n_steps, batch_size e ent_coef para exploração/entropia) para garantir que a IA aprenda rapidamente (em menos de 10-15 segundos) no frontend.
+    *   Criar a classe de Callback personalizada (`BaseCallback`) para enviar as métricas de treino em tempo real para o painel do Streamlit.
+    *   Garantir o salvamento dos pesos do modelo treinado em formato `.zip`.
 *   **Bibliotecas Utilizadas:** `stable-baselines3`
 *   **Responsáveis:**
     *   👤 *[Nome do Desenvolvedor 3]*
@@ -37,7 +38,7 @@ Abaixo está a divisão de tarefas baseada no planejamento técnico da PoC:
 ### 3. 🏗️ Arquitetura e Integração (Individual)
 *   **Foco e Responsabilidades:**
     *   Garantir a integridade da arquitetura modular do projeto.
-    *   Garantir que a classe do ambiente matricial (`envs/`) se comunique perfeitamente com a IA (`agents/`) e com os scripts de execução (`scripts/`).
+    *   Garantir que a classe do ambiente matricial (`envs/`) se comunique perfeitamente com a IA (`agents/`) e que ambos possam ser importados sem atrito diretamente no frontend.
     *   Organizar a estrutura de diretórios, gerenciar as dependências (`requirements.txt`) e realizar refatorações no código.
 *   **Responsável:**
     *   👤 *[Nome do Desenvolvedor 5]*
@@ -48,7 +49,7 @@ Abaixo está a divisão de tarefas baseada no planejamento técnico da PoC:
 *   **Foco e Responsabilidades:**
     *   Criar o dashboard web interativo em Streamlit (`frontend/app.py`).
     *   Permitir que o usuário defina o tamanho da matriz, configure a origem, o destino e adicione/remova obstáculos de forma dinâmica e amigável.
-    *   Interagir com o script de treino e renderizar o mapa do grid e a rota resultante passo a passo.
+    *   Importar o ambiente e o agente PPO, e acionar o treinamento sob demanda, exibindo a barra de progresso, o gráfico de recompensa em tempo real e a rota resultante passo a passo.
 *   **Bibliotecas Utilizadas:** `streamlit`, `matplotlib` (para plotagem da grade).
 *   **Responsáveis:**
     *   👤 *[Nome do Desenvolvedor 6]*

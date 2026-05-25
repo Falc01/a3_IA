@@ -1,6 +1,6 @@
 # Especificação de Arquitetura e Modelagem do Aprendizado por Reforço (RL)
 
-Este documento detalha a modelagem matemática do ambiente Gymnasium, as configurações do agente DQN (Deep Q-Network) e como o fluxo de execução se integra ao frontend em Streamlit.
+Este documento detalha a modelagem matemática do ambiente Gymnasium, as configurações do agente PPO (Proximal Policy Optimization) e como o fluxo de execução se integra diretamente ao frontend em Streamlit.
 
 ---
 
@@ -27,43 +27,35 @@ A política de recompensas guiará o comportamento do agente para atingir o obje
 *   **Custo de Passo:** `-1` (aplicado a cada movimento válido para forçar o agente a encontrar o caminho mais curto).
 
 ### Condição de Parada Adicional (Truncation)
-*   Para evitar loops infinitos caso a IA fique dando voltas no início do treino, o episódio é interrompido (**truncated**) caso atinja um limite máximo de passos calculado como `2 * (largura * altura)` do grid.
+*   Para evitar loops infinitos, o episódio é interrompido (**truncated**) caso atinja um limite máximo de passos calculado como `2 * (largura * altura)` do grid.
 
 ---
 
-## 🧠 2. Configuração do Agente DQN (`stable-baselines3`)
+## 🧠 2. Configuração do Agente PPO (`stable-baselines3`)
 
-Como a grade dinâmica é um espaço de estado bidimensional e discreto de tamanho pequeno a médio (ex: $10 \times 10$), o algoritmo **DQN (Deep Q-Network)** é ideal para este problema. Ele aproxima a tabela de valores Q utilizando uma rede neural (Multi-Layer Perceptron - MLP).
+Como a grade dinâmica é configurável pelo usuário e pode variar de tamanho (ex: de $5 \times 5$ até $20 \times 20$), adotamos o algoritmo **PPO (Proximal Policy Optimization)**. Ele é extremamente estável para ambientes dinâmicos e evita o sobreajuste (overfitting) a um tamanho específico de grid.
 
-### Hiperparâmetros Otimizados para MVP
-Para que o treinamento ocorra de forma fluida durante a demonstração no frontend (tempo de execução inferior a 15 segundos):
+### Hiperparâmetros Otimizados para o MVP
 *   **Política:** `MlpPolicy` (rede neural densa padrão).
-*   **Learning Rate (Taxa de Aprendizado):** `0.001` (convergência rápida).
-*   **Buffer Size (Memória de Replay):** `10000` (otimizado para o tamanho do espaço de estados).
-*   **Exploration Fraction:** `0.2` (a IA explora caminhos aleatórios nos primeiros 20% do treino e passa a agir de forma ótima nos 80% restantes).
-*   **Total Timesteps:** `15000` a `20000` passos são suficientes para convergência em grades de até $10 \times 10$.
+*   **Learning Rate (Taxa de Aprendizado):** `0.0003` (padrão estável do PPO).
+*   **n_steps:** `512` (número de passos coletados antes de atualizar a rede neural. Um valor menor ajuda a treinar mais rápido em grids pequenos).
+*   **batch_size:** `64` (tamanho do lote de processamento da rede).
+*   **n_epochs:** `10` (número de épocas de otimização a cada atualização).
+*   **ent_coef (Coeficiente de Entropia):** `0.01` (estimula a "curiosidade" da IA, garantindo que ela continue explorando o grid mesmo se o usuário adicionar obstáculos no caminho direto).
 
 ---
 
-## 🔄 3. Integração do Fluxo com o Frontend (Streamlit)
+## 🔄 3. Integração Direta no Frontend (Streamlit)
 
-O Streamlit atua como o regente do ciclo de vida da simulação. O fluxo funciona da seguinte forma:
+Para garantir uma interface fluida, em tempo real e sem a necessidade de rodar processos lentos de terminal em segundo plano, **o modelo de IA e o ambiente Gymnasium são importados diretamente dentro do código do Streamlit (`frontend/app.py`)**.
 
-```
-[ Usuário no Frontend ]
-      │ (Ajusta Grid, Início, Fim e Obstáculos)
-      ▼
-[ Salva config/config.json ]
-      │
-      ▼
-[ Inicia scripts/train.py ] ──► (Instancia RotaEnv & Treina DQN)
-      │
-      ▼
-[ Salva data/models/agente_dqn.zip ]
-      │
-      ▼
-[ Roda scripts/evaluate.py ] ──► (Gera lista de coordenadas da rota ideal)
-      │
-      ▼
-[ Renderiza Rota no Frontend ]
-```
+### Fluxo de Execução Embutido
+
+1.  **Interface de Configuração:** O usuário configura os parâmetros do grid (largura, altura, início, fim e obstáculos) através de controles gráficos.
+2.  **Inicialização:** O Streamlit instancia a classe `RotaEnv` diretamente na memória do Python.
+3.  **Treinamento Síncrono:** Ao clicar em "Treinar", o Streamlit inicia o loop de treinamento do PPO.
+4.  **Monitoramento com Callbacks:**
+    *   Utilizamos a classe `BaseCallback` do `stable-baselines3` herdada em um callback personalizado.
+    *   A cada passo do treino, o callback captura o progresso e as recompensas obtidas.
+    *   Esses dados são enviados em tempo real para um componente de progresso (`st.progress`) e um gráfico de linha dinâmico (`st.line_chart`) no painel do usuário, mostrando a IA convergindo.
+5.  **Inferência Visual:** Após o treino (que leva poucos segundos), o modelo é executado no ambiente por um episódio e a rota final calculada é desenhada na grade colorida.
