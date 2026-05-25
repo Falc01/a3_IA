@@ -17,8 +17,8 @@ Abaixo está a divisão de tarefas baseada no planejamento técnico da PoC:
     *   Implementar a lógica de recompensas e penalidades do Gymnasium (recompensas por alcançar o objetivo, penalidade por colisão com obstáculos e custo negativo por passo para forçar a rota mais curta).
 *   **Bibliotecas Utilizadas:** `gymnasium`, `numpy`.
 *   **Responsáveis:**
-    *   👤 *[Nome do Desenvolvedor 1]*
-    *   👤 *[Nome do Desenvolvedor 2]*
+    *   👤 *Daniel*
+    *   👤 *Perrone*
 
 ---
 
@@ -30,8 +30,8 @@ Abaixo está a divisão de tarefas baseada no planejamento técnico da PoC:
     *   Garantir o salvamento dos pesos do modelo treinado em formato `.zip`.
 *   **Bibliotecas Utilizadas:** `stable-baselines3`
 *   **Responsáveis:**
-    *   👤 *[Nome do Desenvolvedor 3]*
-    *   👤 *[Nome do Desenvolvedor 4]*
+    *   👤 *Spinola*
+    *   👤 *Adaime*
 
 ---
 
@@ -41,7 +41,7 @@ Abaixo está a divisão de tarefas baseada no planejamento técnico da PoC:
     *   Garantir que a classe do ambiente matricial (`envs/`) se comunique perfeitamente com a IA (`agents/`) e que ambos possam ser importados sem atrito diretamente no frontend.
     *   Organizar a estrutura de diretórios, gerenciar as dependências (`requirements.txt`) e realizar refatorações no código.
 *   **Responsável:**
-    *   👤 *[Nome do Desenvolvedor 5]*
+    *   👤 *Kawan*
 
 ---
 
@@ -52,4 +52,4 @@ Abaixo está a divisão de tarefas baseada no planejamento técnico da PoC:
     *   Importar o ambiente e o agente PPO, e acionar o treinamento sob demanda, exibindo a barra de progresso, o gráfico de recompensa em tempo real e a rota resultante passo a passo.
 *   **Bibliotecas Utilizadas:** `streamlit`, `matplotlib` (para plotagem da grade).
 *   **Responsáveis:**
-    *   👤 *[Nome do Desenvolvedor 6]*
+    *   👤 *Aurea*
