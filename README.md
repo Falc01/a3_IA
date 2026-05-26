@@ -54,3 +54,37 @@ Abaixo está a descrição da estrutura de pastas e seus propósitos:
 
 *   **Modelagem de IA e Arquitetura:** Para entender o ambiente Gymnasium, a lógica de recompensas e a configuração detalhada do PPO, leia o guia de [Arquitetura e Aprendizado por Reforço](./docs/architecture_and_rl.md).
 *   **Alocação de Tarefas:** Para ver qual integrante da equipe é responsável por cada parte do código, consulte o [Guia de Contribuição](./CONTRIBUTING.md) na raiz do projeto.
+
+---
+
+## 🛠️ Como Configurar e Executar (Passo a Passo)
+
+Para rodar este projeto em sua máquina local, siga as instruções abaixo no terminal (na raiz do projeto):
+
+### 1. Criar o Ambiente Virtual (venv)
+```powershell
+python -m venv venv
+```
+
+### 2. Ativar o Ambiente Virtual
+*   **No Windows (PowerShell):**
+    ```powershell
+    .\venv\Scripts\activate
+    ```
+*   **No Linux/macOS:**
+    ```bash
+    source venv/bin/activate
+    ```
+
+*(Você verá um prefixo `(venv)` no seu terminal indicando que o ambiente está ativo).*
+
+### 3. Instalar as Dependências
+```bash
+pip install -r requirements.txt
+```
+
+### 4. Executar o Frontend (Streamlit)
+```bash
+streamlit run frontend/app.py
+```
+
