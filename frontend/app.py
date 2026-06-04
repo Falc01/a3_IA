@@ -16,104 +16,31 @@ import time
 import json
 import numpy as np
 import streamlit as st
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 
 # ── Importações do projeto ────────────────────────────────────────────────────
 from envs.rota_env import RotaEnv, RotaConfig
-from agents.gerenciador_agente import GerenciadorAgentePPO
-from stable_baselines3.common.callbacks import BaseCallback
+from agents.gerenciador_agente import GerenciadorAgenteSarsa
+from utils.callbacks import StreamlitCallback
+from utils.map_generator import is_solvable, generate_map_obstacles
+from utils.plot_utils import build_grid_fig, build_reward_chart, build_steps_chart
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Configuração da Página
 # ─────────────────────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="RL Route Finder — PPO",
+    page_title="RL Route Finder",
     page_icon="🤖",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-# ── CSS Customizado ───────────────────────────────────────────────────────────
-st.markdown("""
-<style>
-    /* Fundo geral */
-    .stApp { background-color: #0e1117; }
 
-    /* Cabeçalho hero */
-    .hero-box {
-        background: linear-gradient(135deg, #1a1f2e 0%, #16213e 60%, #0f3460 100%);
-        border: 1px solid #2d3561;
-        border-radius: 16px;
-        padding: 28px 36px 20px;
-        margin-bottom: 24px;
-        text-align: center;
-    }
-    .hero-box h1 { color: #e0e7ff; font-size: 2.2rem; margin: 0; }
-    .hero-box p  { color: #94a3b8; font-size: 1rem; margin-top: 8px; }
-
-    /* Cards de métricas */
-    .metric-card {
-        background: #1e2130;
-        border: 1px solid #2d3561;
-        border-radius: 12px;
-        padding: 16px 20px;
-        text-align: center;
-    }
-    .metric-card .label { color: #64748b; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em; }
-    .metric-card .value { color: #a5b4fc; font-size: 1.8rem; font-weight: 700; }
-
-    /* Seções */
-    .section-title {
-        color: #c7d2fe;
-        font-size: 1.05rem;
-        font-weight: 600;
-        border-left: 3px solid #6366f1;
-        padding-left: 10px;
-        margin: 20px 0 12px;
-    }
-
-    /* Badges de estado da célula */
-    .cell-legend {
-        display: flex; gap: 12px; flex-wrap: wrap; margin-top: 6px;
-    }
-    .badge {
-        display: inline-flex; align-items: center; gap: 6px;
-        background: #1e2130; border: 1px solid #2d3561;
-        border-radius: 20px; padding: 4px 12px;
-        font-size: 0.8rem; color: #cbd5e1;
-    }
-
-    /* Botões */
-    .stButton > button {
-        background: linear-gradient(135deg, #4f46e5, #7c3aed);
-        color: white; border: none; border-radius: 8px;
-        font-weight: 600; transition: opacity .2s;
-    }
-    .stButton > button:hover { opacity: 0.85; }
-
-    /* Sidebar */
-    [data-testid="stSidebar"] { background-color: #13172b; }
-    [data-testid="stSidebar"] h2 { color: #e0e7ff; }
-
-    /* Info / warning boxes */
-    .info-box {
-        background: #1e2840; border: 1px solid #3b4ea8;
-        border-radius: 10px; padding: 12px 16px;
-        color: #93c5fd; font-size: 0.88rem;
-    }
-    .warn-box {
-        background: #2a1e10; border: 1px solid #9a5a1e;
-        border-radius: 10px; padding: 12px 16px;
-        color: #fbbf24; font-size: 0.88rem;
-    }
-    .success-box {
-        background: #0f2d1e; border: 1px solid #16803c;
-        border-radius: 10px; padding: 12px 16px;
-        color: #4ade80; font-size: 0.88rem;
-    }
-</style>
-""", unsafe_allow_html=True)
+def _load_css() -> None:
+    """Carrega o CSS customizado a partir do arquivo style.css"""
+    css_path = os.path.join(ROOT_DIR, "frontend", "style.css")
+    if os.path.exists(css_path):
+        with open(css_path, "r", encoding="utf-8") as f:
+            st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -125,145 +52,37 @@ def _init_state():
         "grid_h": 8,
         "start": [0, 0],
         "goal": [7, 7],
-        "obstacles": [],
+        "obstacles": None,
         "cell_mode": "obstacle",   # "start" | "goal" | "obstacle" | "erase"
         "model": None,
         "trained": False,
         "training_rewards": [],
+        "training_steps": [],
         "rota": [],
         "rota_info": {},
-        "total_timesteps": 20000,
+        "total_episodes": 1000,
+        "use_reward_shaping": True,
         "training_log": [],
     }
     for k, v in defaults.items():
         if k not in st.session_state:
             st.session_state[k] = v
 
-_init_state()
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Callback Streamlit
-# ─────────────────────────────────────────────────────────────────────────────
-class StreamlitCallback(BaseCallback):
-    def __init__(self, total_timesteps, progress_bar, chart_placeholder, log_placeholder, verbose=0):
-        super().__init__(verbose)
-        self.total_timesteps = total_timesteps
-        self.progress_bar = progress_bar
-        self.chart_ph = chart_placeholder
-        self.log_ph = log_placeholder
-        self.rewards: list[float] = []
-
-    def _on_step(self) -> bool:
-        progress = min(self.num_timesteps / self.total_timesteps, 1.0)
-        self.progress_bar.progress(progress, text=f"🔄 Treinando: {self.num_timesteps:,} / {self.total_timesteps:,} passos")
-
-        if "episode" in self.locals["infos"][0]:
-            r = self.locals["infos"][0]["episode"]["r"]
-            self.rewards.append(float(r))
-            st.session_state["training_rewards"] = self.rewards[:]
-
-            if len(self.rewards) % 5 == 0 or len(self.rewards) <= 3:
-                fig = _build_reward_chart(self.rewards)
-                self.chart_ph.plotly_chart(fig, use_container_width=True, key=f"rt_{len(self.rewards)}")
-
-        return True
+    # Se obstacles for None, gera um mapa inicial solucionável
+    if st.session_state["obstacles"] is None:
+        st.session_state["obstacles"] = generate_map_obstacles(
+            "Aleatório",
+            st.session_state.grid_w,
+            st.session_state.grid_h,
+            st.session_state.start,
+            st.session_state.goal,
+            0.2
+        )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
-def _build_grid_fig(
-    w: int, h: int,
-    start: list, goal: list,
-    obstacles: list,
-    rota: list | None = None,
-    agent_pos: list | None = None,
-) -> go.Figure:
-    """Gera a figura Plotly da grade."""
-    z = np.zeros((h, w))          # 0 = livre
-    text = [["" for _ in range(w)] for _ in range(h)]
-    colors = {
-        "free": "#1e2130",
-        "obstacle": "#374151",
-        "start": "#4f46e5",
-        "goal": "#16a34a",
-        "path": "#7c3aed",
-        "agent": "#f59e0b",
-    }
-
-    # Mapa de z para cor discreta
-    # 0=livre, 1=obstáculo, 2=start, 3=goal, 4=caminho, 5=agente
-    COLOR_MAP = [
-        colors["free"],
-        colors["obstacle"],
-        colors["start"],
-        colors["goal"],
-        colors["path"],
-        colors["agent"],
-    ]
-
-    obs_set = {tuple(o) for o in obstacles}
-    path_set = {tuple(p) for p in (rota or [])}
-
-    for row in range(h):
-        for col in range(w):
-            pos = (col, row)
-            if pos in obs_set:
-                z[row][col] = 1
-                text[row][col] = "🚧"
-            elif pos == tuple(start):
-                z[row][col] = 2
-                text[row][col] = "A"
-            elif pos == tuple(goal):
-                z[row][col] = 3
-                text[row][col] = "B"
-            elif agent_pos and pos == tuple(agent_pos):
-                z[row][col] = 5
-                text[row][col] = "🤖"
-            elif pos in path_set:
-                z[row][col] = 4
-                text[row][col] = "·"
-
-    fig = go.Figure(go.Heatmap(
-        z=z,
-        text=text,
-        texttemplate="%{text}",
-        colorscale=[[i / 5, c] for i, c in enumerate(COLOR_MAP)],
-        showscale=False,
-        zmin=0, zmax=5,
-        xgap=2, ygap=2,
-    ))
-
-    # Grade de linhas (bordas)
-    for i in range(w + 1):
-        fig.add_shape(type="line", x0=i - 0.5, x1=i - 0.5, y0=-0.5, y1=h - 0.5,
-                      line=dict(color="#2d3561", width=1))
-    for j in range(h + 1):
-        fig.add_shape(type="line", x0=-0.5, x1=w - 0.5, y0=j - 0.5, y1=j - 0.5,
-                      line=dict(color="#2d3561", width=1))
-
-    # Anotações de coordenada nas células (opcional — fica pesado em grids grandes)
-    if w <= 12 and h <= 12:
-        for row in range(h):
-            for col in range(w):
-                if z[row][col] == 0:
-                    fig.add_annotation(
-                        x=col, y=row,
-                        text=f"<span style='color:#2d3561;font-size:9px'>{col},{row}</span>",
-                        showarrow=False, font=dict(size=8),
-                    )
-
-    fig.update_layout(
-        paper_bgcolor="#0e1117",
-        plot_bgcolor="#0e1117",
-        margin=dict(l=10, r=10, t=10, b=10),
-        height=max(320, min(560, h * 48)),
-        xaxis=dict(showgrid=False, zeroline=False, showticklabels=False,
-                   range=[-0.5, w - 0.5], constrain="domain"),
-        yaxis=dict(showgrid=False, zeroline=False, showticklabels=False,
-                   range=[-0.5, h - 0.5], scaleanchor="x", scaleratio=1, autorange="reversed"),
-    )
-    return fig
 
 
 def _build_reward_chart(rewards: list[float]) -> go.Figure:
@@ -301,11 +120,19 @@ def _run_inference(model, config: RotaConfig) -> tuple[list, dict]:
     total_reward = 0.0
     steps = 0
     done = False
+    last_pos = env._state.tolist()
 
     while not done and steps < config.max_steps:
-        action, _ = model.predict(obs, deterministic=True)
+        action, _ = model.predict(int(obs), deterministic=True)
         obs, reward, terminated, truncated, info = env.step(int(action))
-        path.append(list(env._state.tolist()))
+        
+        current_pos = env._state.tolist()
+        if current_pos == last_pos:
+            # Agente colidiu e ficou travado. Para a inferência para evitar loop repetitivo na UI
+            break
+            
+        path.append(current_pos)
+        last_pos = current_pos
         total_reward += float(reward)
         steps += 1
         done = terminated or truncated
@@ -335,14 +162,15 @@ def _validate_config() -> str | None:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SIDEBAR — Configurações
-# ─────────────────────────────────────────────────────────────────────────────
+_init_state()
+_load_css()
+
 with st.sidebar:
     st.markdown("## ⚙️ Configurações")
     st.divider()
 
-    # Dimensões
-    st.markdown('<div class="section-title">📐 Dimensões da Grade</div>', unsafe_allow_html=True)
+    # Gerador de Mapas
+    st.markdown('<div class="section-title">🎲 Gerador de Mapas</div>', unsafe_allow_html=True)
     new_w = st.slider("Largura (colunas)", 4, 20, st.session_state.grid_w, key="sl_w")
     new_h = st.slider("Altura (linhas)", 4, 20, st.session_state.grid_h, key="sl_h")
 
@@ -362,6 +190,59 @@ with st.sidebar:
         st.session_state.model = None
         st.session_state.rota = []
 
+    # Configurações de Geração
+    gen_type = st.selectbox(
+        "Padrão de Obstáculos",
+        ["Aleatório", "Paredes Alternadas", "Barreira Central"],
+        key="gen_type"
+    )
+    
+    gen_density = 0.2
+    if gen_type == "Aleatório":
+        gen_density = st.slider(
+            "Densidade de Obstáculos",
+            0.1, 0.5, 0.2, 0.05,
+            key="gen_density"
+        )
+        
+    if st.button("🎲 Gerar Novo Mapa", use_container_width=True):
+        st.session_state.obstacles = generate_map_obstacles(
+            gen_type,
+            st.session_state.grid_w,
+            st.session_state.grid_h,
+            st.session_state.start,
+            st.session_state.goal,
+            gen_density
+        )
+        st.session_state.rota = []
+        st.session_state.trained = False
+        st.session_state.model = None
+        st.rerun()
+
+    st.divider()
+
+    # Treinamento
+    st.markdown('<div class="section-title">🧠 Treinamento SARSA</div>', unsafe_allow_html=True)
+    episodes = st.number_input(
+        "Total de Episódios",
+        min_value=1,
+        max_value=100000,
+        value=int(st.session_state.total_episodes),
+        step=100,
+    )
+    st.session_state.total_episodes = episodes
+    early_stop_enabled = st.checkbox(
+        "Habilitar Early Stopping",
+        value=False,
+        help="Interrompe o treinamento automaticamente quando as recompensas recentes estabilizam."
+    )
+    use_reward_shaping = st.checkbox(
+        "Habilitar Heurística de Recompensa (BFS)",
+        value=True,
+        help="Usa a distância mais curta via BFS para guiar o robô. Desmarque para treinar de forma 'cega' (aprendizado mais lento)."
+    )
+    st.session_state.use_reward_shaping = use_reward_shaping
+
     st.divider()
 
     # Posições
@@ -379,36 +260,7 @@ with st.sidebar:
 
     st.divider()
 
-    # Treinamento
-    st.markdown('<div class="section-title">🧠 Treinamento PPO</div>', unsafe_allow_html=True)
-    ts = st.select_slider(
-        "Total de Timesteps",
-        options=[5000, 10000, 20000, 50000, 100000],
-        value=st.session_state.total_timesteps,
-    )
-    st.session_state.total_timesteps = ts
-
-    st.divider()
-
-    # Obstáculos
-    st.markdown('<div class="section-title">🚧 Obstáculos (clique na grade)</div>', unsafe_allow_html=True)
-    cell_mode = st.radio(
-        "Modo de clique",
-        ["obstacle", "erase", "start", "goal"],
-        format_func=lambda x: {"obstacle": "🚧 Adicionar", "erase": "🧹 Apagar",
-                                "start": "🔵 Mover início", "goal": "🟢 Mover destino"}[x],
-        horizontal=False,
-        index=["obstacle", "erase", "start", "goal"].index(st.session_state.cell_mode),
-    )
-    st.session_state.cell_mode = cell_mode
-
-    if st.button("🗑️ Limpar todos os obstáculos"):
-        st.session_state.obstacles = []
-        st.session_state.rota = []
-        st.rerun()
-
     # Export JSON
-    st.divider()
     st.markdown('<div class="section-title">💾 Exportar Configuração</div>', unsafe_allow_html=True)
     config_dict = {
         "width": st.session_state.grid_w,
@@ -448,7 +300,7 @@ with st.sidebar:
 # ─────────────────────────────────────────────────────────────────────────────
 st.markdown("""
 <div class="hero-box">
-  <h1>🤖 RL Route Finder — PPO</h1>
+  <h1>🤖 RL Route Finder</h1>
   <p>Configure a grade, defina obstáculos, treine o agente e visualize a rota encontrada.</p>
 </div>
 """, unsafe_allow_html=True)
@@ -465,7 +317,7 @@ with m2:
     unsafe_allow_html=True)
 with m3:
     status = "✅ Treinado" if st.session_state.trained else "⏳ Aguardando"
-    st.markdown(f"""<div class="metric-card"><div class="label">Agente PPO</div>
+    st.markdown(f"""<div class="metric-card"><div class="label">Agente SARSA</div>
     <div class="value" style="font-size:1.1rem">{status}</div></div>""",
     unsafe_allow_html=True)
 with m4:
@@ -484,103 +336,57 @@ tab_grade, tab_treino, tab_rota = st.tabs(["🗺️  Grade Interativa", "🧠  T
 # TAB 1 — GRADE INTERATIVA
 # ══════════════════════════════════════════════════════════════════════════════
 with tab_grade:
-    st.markdown('<div class="section-title">Clique nas células para editar</div>', unsafe_allow_html=True)
-    st.markdown("""
-    <div class="cell-legend">
-      <span class="badge"><span style="color:#4f46e5">■</span> Início (A)</span>
-      <span class="badge"><span style="color:#16a34a">■</span> Destino (B)</span>
-      <span class="badge"><span style="color:#374151">■</span> Obstáculo</span>
-      <span class="badge"><span style="color:#7c3aed">■</span> Rota PPO</span>
-    </div>
-    <br>
-    """, unsafe_allow_html=True)
-
     err = _validate_config()
     if err:
         st.markdown(f'<div class="warn-box">{err}</div>', unsafe_allow_html=True)
 
-    # Grade de botões clicáveis
-    w = st.session_state.grid_w
-    h = st.session_state.grid_h
-    obs_set = {tuple(o) for o in st.session_state.obstacles}
-    path_set = {tuple(p) for p in st.session_state.rota}
-
-    EMOJI = {
-        "free": "⬜",
-        "obstacle": "🚧",
-        "start": "🔵",
-        "goal": "🟢",
-        "path": "🟣",
-    }
-
-    for row in range(h):
-        cols = st.columns(w)
-        for col in range(w):
-            pos = (col, row)
-            if pos == tuple(st.session_state.start):
-                icon = EMOJI["start"]
-            elif pos == tuple(st.session_state.goal):
-                icon = EMOJI["goal"]
-            elif pos in obs_set:
-                icon = EMOJI["obstacle"]
-            elif pos in path_set:
-                icon = EMOJI["path"]
-            else:
-                icon = EMOJI["free"]
-
-            if cols[col].button(icon, key=f"cell_{col}_{row}", use_container_width=True):
-                mode = st.session_state.cell_mode
-                if mode == "start":
-                    if pos != tuple(st.session_state.goal):
-                        st.session_state.start = [col, row]
-                        st.session_state.rota = []
-                elif mode == "goal":
-                    if pos != tuple(st.session_state.start):
-                        st.session_state.goal = [col, row]
-                        st.session_state.rota = []
-                elif mode == "obstacle":
-                    if pos not in (tuple(st.session_state.start), tuple(st.session_state.goal)):
-                        if list(pos) not in st.session_state.obstacles:
-                            st.session_state.obstacles.append(list(pos))
-                        st.session_state.rota = []
-                elif mode == "erase":
-                    if list(pos) in st.session_state.obstacles:
-                        st.session_state.obstacles.remove(list(pos))
-                        st.session_state.rota = []
-                st.rerun()
-
     # Visualização Plotly (somente leitura, mas mostra a rota)
     st.markdown('<div class="section-title">Visualização da Grade</div>', unsafe_allow_html=True)
-    fig_grid = _build_grid_fig(
+    w = st.session_state.grid_w
+    h = st.session_state.grid_h
+    fig_grid = build_grid_fig(
         w, h,
         st.session_state.start,
         st.session_state.goal,
         st.session_state.obstacles,
         rota=st.session_state.rota,
     )
-    st.plotly_chart(fig_grid, use_container_width=True)
+    st.plotly_chart(fig_grid, use_container_width=True, key="grid_map_tab1")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 2 — TREINAR AGENTE
 # ══════════════════════════════════════════════════════════════════════════════
 with tab_treino:
-    st.markdown('<div class="section-title">Parâmetros do Treinamento PPO</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">Parâmetros do Treinamento SARSA</div>', unsafe_allow_html=True)
 
     col_params, col_info = st.columns([2, 1])
     with col_params:
-        hp_lr = st.select_slider("Learning Rate", [0.0001, 0.0003, 0.001, 0.003], value=0.0003)
-        hp_ent = st.select_slider("Coeficiente de Entropia", [0.0, 0.005, 0.01, 0.05, 0.1], value=0.01)
-        hp_nsteps = st.select_slider("n_steps", [128, 256, 512, 1024], value=512)
-        hp_seed = st.number_input("Seed", 0, 9999, 42)
+        c1, c2 = st.columns(2)
+        with c1:
+            hp_lr = st.number_input("Learning Rate (Taxa de Aprendizado Alpha)", min_value=0.01, max_value=1.0, value=0.10, step=0.05, format="%.2f")
+            hp_gamma = st.number_input("Gamma (Fator de Desconto)", min_value=0.0, max_value=1.0, value=0.95, step=0.05, format="%.2f")
+            hp_seed = st.number_input("Seed", 0, 9999, 42)
+        with c2:
+            hp_epsilon = st.number_input("Epsilon Inicial (Exploração)", min_value=0.0, max_value=1.0, value=0.30, step=0.05, format="%.2f")
+            hp_decay = st.number_input("Decaimento de Epsilon", min_value=0.80, max_value=1.0, value=0.99, step=0.01, format="%.2f")
+            hp_epsilon_min = st.number_input("Epsilon Mínimo", min_value=0.0, max_value=0.5, value=0.01, step=0.01, format="%.2f")
 
     with col_info:
         st.markdown("""
-        <div class="info-box">
-        <b>💡 Dicas</b><br><br>
-        <b>Learning Rate:</b> 0.0003 é estável para a maioria dos grids.<br><br>
-        <b>Entropia:</b> Valores maiores = mais exploração. Útil para grids com labirintos.<br><br>
-        <b>n_steps:</b> Passos coletados antes de atualizar a rede.
+        <div class="info-box" style="line-height: 1.5;">
+        <b>💡 Guia Teórico & Hiperparâmetros SARSA</b><br><br>
+        O <b>SARSA</b> é um algoritmo de Aprendizado por Reforço clássico (Tabular e <i>On-Policy</i>). Ele atualiza os valores da tabela Q com base no estado atual ($s$), ação atual ($a$), recompensa ($R$), próximo estado ($s'$) e a próxima ação ($a'$):
+        <div style="background:#13172b; padding:8px; border-radius:6px; margin: 8px 0; border:1px solid #2d3561; font-family:monospace; text-align:center;">
+        Q(s,a) &larr; Q(s,a) + &alpha; [R + &gamma; Q(s',a') - Q(s,a)]
+        </div>
+        <b>📚 Significado dos Parâmetros:</b><br><br>
+        <b>• Alpha (&alpha;) - Aprendizado (Alpha):</b> Controla a velocidade de atualização. Um valor maior aprende rápido, mas pode instabilizar. Um valor menor (0.10) faz o aprendizado ser gradual e estável.<br><br>
+        <b>• Gamma (&gamma;) - Desconto:</b> Mede a importância de recompensas futuras. Próximo de 1.0 (ex: 0.95) faz o agente planejar rotas de longo prazo (previdente). Próximo de 0 faz focar apenas em recompensas imediatas (oportunista).<br><br>
+        <b>• Epsilon (&epsilon;) Inicial - Exploração:</b> Chance inicial de escolher uma ação aleatória em vez da melhor conhecida. Garante que o robô explore novos caminhos na grade no início do treino.<br><br>
+        <b>• Decaimento de Epsilon:</b> Fator multiplicativo pelo qual o Epsilon é reduzido a cada episódio. Reduz gradualmente a exploração à medida que a Q-table se consolida, priorizando a rota otimizada.<br><br>
+        <b>• Epsilon Mínimo:</b> Limite inferior para a exploração residual. Garante que o robô mantenha um nível mínimo de aleatoriedade saudável para testes.<br><br>
+        <b>• Total de Episódios:</b> Quantidade de ciclos completos de treinamento. Mais ciclos dão tempo para que os valores de estados e ações convirjam perfeitamente.
         </div>
         """, unsafe_allow_html=True)
 
@@ -605,69 +411,114 @@ with tab_treino:
                 start=tuple(st.session_state.start),
                 goal=tuple(st.session_state.goal),
                 obstacles=[tuple(o) for o in st.session_state.obstacles],
+                use_reward_shaping=st.session_state.use_reward_shaping
             )
             env = RotaEnv(config)
 
-            gerenciador = GerenciadorAgentePPO(env=env)
-            gerenciador.configurar_agente(
-                kwargs_personalizados={
-                    "learning_rate": hp_lr,
-                    "ent_coef": hp_ent,
-                    "n_steps": hp_nsteps,
-                    "verbose": 0,
-                },
-                seed=int(hp_seed),
-            )
+            gerenciador = GerenciadorAgenteSarsa(env=env)
+            gerenciador.configurar_agente(seed=int(hp_seed))
 
             st.markdown('<div class="section-title">📊 Progresso do Treinamento</div>', unsafe_allow_html=True)
             progress_bar = st.progress(0.0, text="Iniciando…")
             chart_ph = st.empty()
+            chart_steps_ph = st.empty()
             log_ph = st.empty()
 
             callback = StreamlitCallback(
-                total_timesteps=st.session_state.total_timesteps,
+                total_episodios=st.session_state.total_episodes,
                 progress_bar=progress_bar,
                 chart_placeholder=chart_ph,
+                chart_steps_placeholder=chart_steps_ph,
                 log_placeholder=log_ph,
+                early_stop_enabled=early_stop_enabled,
             )
 
             t0 = time.time()
             try:
                 gerenciador.treinar(
-                    total_timesteps=st.session_state.total_timesteps,
+                    total_episodios=st.session_state.total_episodes,
+                    learning_rate=hp_lr,
+                    gamma=hp_gamma,
+                    epsilon_inicial=hp_epsilon,
+                    epsilon_min=hp_epsilon_min,
+                    decaimento_epsilon=hp_decay,
                     callback=callback,
                 )
                 elapsed = time.time() - t0
-                st.session_state.model = gerenciador.model
+                st.session_state.training_rewards = callback.rewards
+                st.session_state.training_steps = callback.steps
+                st.session_state.model = gerenciador
                 st.session_state.trained = True
 
+                if callback.early_stopped:
+                    st.info(f"⏱️ Parada Antecipada (Early Stopping) acionada! O aprendizado convergiu e se estabilizou no episódio {len(callback.rewards)}.")
+                    progress_bar.progress(1.0, text="✅ Treinamento concluído (Early Stopping)!")
+                else:
+                    progress_bar.progress(1.0, text="✅ Treinamento concluído!")
+
                 st.markdown(
-                    f'<div class="success-box">✅ Treinamento concluído em {elapsed:.1f}s — '
-                    f'{len(st.session_state.training_rewards)} episódios registrados.</div>',
+                    f'<div class="success-box">✅ Treinamento finalizado em {elapsed:.1f}s — '
+                    f'{len(callback.rewards)} episódios registrados.</div>',
                     unsafe_allow_html=True
                 )
-                progress_bar.progress(1.0, text="✅ Treinamento concluído!")
-
-                # Exibir gráfico final
-                if st.session_state.training_rewards:
-                    st.plotly_chart(
-                        _build_reward_chart(st.session_state.training_rewards),
-                        use_container_width=True,
-                    )
 
             except Exception as e:
                 st.error(f"Erro durante o treinamento: {e}")
 
-    # Histórico de recompensas (se já treinou antes)
-    if st.session_state.training_rewards and not (err):
-        with st.expander("📜 Ver histórico de recompensas", expanded=False):
-            st.line_chart(st.session_state.training_rewards, height=200)
-            rw = np.array(st.session_state.training_rewards)
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Episódios", len(rw))
-            c2.metric("Máxima", f"{rw.max():.1f}")
-            c3.metric("Média (últimos 20%)", f"{rw[int(len(rw)*0.8):].mean():.1f}")
-            c4.metric("Mínima", f"{rw.min():.1f}")
+    # Histórico de recompensas persistente (se já treinou antes)
+    if st.session_state.trained and st.session_state.training_rewards and not (err):
+        st.markdown('<div class="section-title">📊 Resultados do Treinamento</div>', unsafe_allow_html=True)
+        
+        c_fig1, c_fig2 = st.columns(2)
+        with c_fig1:
+            st.plotly_chart(
+                build_reward_chart(st.session_state.training_rewards),
+                use_container_width=True,
+                key="reward_chart_tab2_persistent",
+            )
+        with c_fig2:
+            if st.session_state.training_steps:
+                st.plotly_chart(
+                    build_steps_chart(st.session_state.training_steps),
+                    use_container_width=True,
+                    key="steps_chart_tab2_persistent",
+                )
+        
+        rw = np.array(st.session_state.training_rewards)
+        st_steps = np.array(st.session_state.training_steps)
+        
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Episódios", len(rw))
+        c2.metric("Recompensa Máxima", f"{rw.max():.1f}")
+        c3.metric("Média (últimos 20%)", f"{rw[int(len(rw)*0.8):].mean():.1f}")
+        if len(st_steps) > 0:
+            c4.metric("Menor Qtd Passos", int(st_steps.min()))
+        else:
+            c4.metric("Recompensa Mínima", f"{rw.min():.1f}")
+            
+        st.divider()
+        
+        # Mostrar a Q-table
+        with st.expander("📊 Q-Table (Tabela Q de Estados e Ações)", expanded=False):
+            gerenciador = st.session_state.model
+            if gerenciador is not None:
+                q_table = gerenciador.Q
+                h = st.session_state.grid_h
+                w = st.session_state.grid_w
+                rows = []
+                for s in range(len(q_table)):
+                    cx = s // h
+                    cy = s % h
+                    rows.append({
+                        "Estado": f"E{s} ({cx}, {cy})",
+                        "cima": q_table[s, 0],
+                        "direita": q_table[s, 1],
+                        "baixo": q_table[s, 2],
+                        "esquerda": q_table[s, 3]
+                    })
+                import pandas as pd
+                df_q = pd.DataFrame(rows)
+                st.dataframe(df_q, use_container_width=True, hide_index=True)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -714,7 +565,7 @@ with tab_rota:
 
             st.markdown('<div class="section-title">Rota Calculada pelo Agente</div>', unsafe_allow_html=True)
 
-            fig_rota = _build_grid_fig(
+            fig_rota = build_grid_fig(
                 st.session_state.grid_w,
                 st.session_state.grid_h,
                 st.session_state.start,
@@ -722,14 +573,14 @@ with tab_rota:
                 st.session_state.obstacles,
                 rota=st.session_state.rota,
             )
-            st.plotly_chart(fig_rota, use_container_width=True)
+            st.plotly_chart(fig_rota, use_container_width=True, key="route_map_tab3")
 
             # Animação passo-a-passo
             with st.expander("🎬 Animação passo-a-passo", expanded=False):
                 if st.button("▶️ Animar"):
                     anim_ph = st.empty()
                     for step_i, pos in enumerate(st.session_state.rota):
-                        fig_anim = _build_grid_fig(
+                        fig_anim = build_grid_fig(
                             st.session_state.grid_w,
                             st.session_state.grid_h,
                             st.session_state.start,
@@ -764,6 +615,6 @@ with tab_rota:
 st.divider()
 st.markdown(
     '<p style="color:#475569;text-align:center;font-size:0.8rem">'
-    'RL Route Finder · PPO + Gymnasium · Streamlit Frontend</p>',
+    'RL Route Finder · SARSA + Gymnasium · Streamlit Frontend</p>',
     unsafe_allow_html=True
 )

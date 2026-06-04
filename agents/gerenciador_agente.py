@@ -1,93 +1,114 @@
 import os
+import random
+import numpy as np
 import gymnasium as gym
-from stable_baselines3 import PPO
-from stable_baselines3.common.callbacks import BaseCallback
-from stable_baselines3.common.logger import configure
+from typing import Optional, Any
 
-class GerenciadorAgentePPO:
+
+class GerenciadorAgenteSarsa:
     """
     Classe responsável por centralizar a configuração, treinamento e 
-    inferência do agente PPO adaptado para o cenário de Logística de Veículos.
+    inferência do agente utilizando o algoritmo SARSA Tabular.
     """
-    def __init__(self, env: gym.Env = None, log_dir: str = "data/logs/", model_dir: str = "data/models/"):
-        # O ambiente agora é opcional no início, permitindo carregar modelos apenas para inferência
+    def __init__(self, env: gym.Env, q_table: Optional[np.ndarray] = None) -> None:
         self.env = env
-        self.log_dir = log_dir
-        self.model_dir = model_dir
-        self.model = None
+        self.n_estados = env.observation_space.n
+        self.n_acoes = env.action_space.n
         
-        os.makedirs(self.log_dir, exist_ok=True)
-        os.makedirs(self.model_dir, exist_ok=True)
+        # Inicializa a Q-table com zeros
+        if q_table is not None:
+            self.Q = q_table
+        else:
+            self.Q = np.zeros((self.n_estados, self.n_acoes))
 
-    def configurar_agente(self, kwargs_personalizados: dict = None, seed: int = 42) -> PPO:
+    def escolher_acao(self, estado: int, epsilon: float) -> int:
+        """Escolhe uma ação usando a estratégia epsilon-greedy com desempate aleatório."""
+        if random.random() < epsilon:
+            return random.randint(0, self.n_acoes - 1)
+        
+        q_valores = self.Q[estado]
+        max_q = np.max(q_valores)
+        # Identifica todas as ações com o valor máximo para desempatar aleatoriamente
+        acoes_candidatas = np.where(q_valores == max_q)[0]
+        return int(random.choice(acoes_candidatas))
+
+    def configurar_agente(self, kwargs_personalizados: Optional[dict[str, Any]] = None, seed: int = 42) -> None:
+        """Mantido para compatibilidade de interface, reinicializa a Q-table e define sementes."""
+        random.seed(seed)
+        np.random.seed(seed)
+        self.Q = np.zeros((self.n_estados, self.n_acoes))
+
+    def treinar(
+        self,
+        total_episodios: int = 1000,
+        learning_rate: float = 0.1,
+        gamma: float = 0.95,
+        epsilon_inicial: float = 0.3,
+        epsilon_min: float = 0.01,
+        decaimento_epsilon: float = 0.99,
+        callback: Optional[Any] = None
+    ) -> list[float]:
         """
-        Configura o PPO com os hiperparâmetros padrão da PoC, permitindo
-        a sobrescrita de parâmetros para experimentos dinâmicos.
+        Treina o agente utilizando a regra de atualização do SARSA:
+        Q(s, a) = Q(s, a) + alpha * [R + gamma * Q(s', a') - Q(s, a)]
         """
-        if self.env == None:
-            raise ValueError("Para configurar um novo agente, um ambiente (env) precisa ser fornecido.")
+        historico_recompensas = []
+        epsilon = epsilon_inicial
 
-        # Hiperparâmetros base (conforme especificação arquitetural)
-        hiperparametros = {
-            "policy": "MlpPolicy",
-            "env": self.env,
-            "learning_rate": 0.0003,
-            "n_steps": 512,
-            "batch_size": 64,
-            "n_epochs": 10,
-            "ent_coef": 0.01,
-            "verbose": 1,
-            "seed": seed
-        }
-        
-        # Permite alterar parâmetros dinamicamente sem mexer na estrutura da classe
-        if kwargs_personalizados:
-            hiperparametros.update(kwargs_personalizados)
-        
-        self.model = PPO(**hiperparametros)
-        
-        # Configura o Logger
-        new_logger = configure(self.log_dir, ["stdout", "tensorboard"])
-        self.model.set_logger(new_logger)
-        
-        return self.model
-
-    def treinar(self, total_timesteps: int = 20000, callback: BaseCallback = None):
-        if self.model is None:
-            raise ValueError("O agente precisa ser configurado ou carregado antes do treino.")
-        
-        print(f"Iniciando treinamento logístico por {total_timesteps} timesteps...")
-        self.model.learn(total_timesteps=total_timesteps, callback=callback)
-        print("Treinamento concluído com sucesso!")
-
-    def salvar_modelo(self, nome_arquivo: str = "agente_ppo_logistica"):
-        if self.model is None:
-            raise ValueError("Não há modelo disponível para salvar.")
-        
-        # Remove a extensão .zip se o usuário a tiver colocado, evitando 'nome.zip.zip'
-        if nome_arquivo.endswith(".zip"):
-            nome_arquivo = nome_arquivo[:-4]
+        for ep in range(1, total_episodios + 1):
+            obs, info = self.env.reset()
+            estado = int(obs)
+            acao = self.escolher_acao(estado, epsilon)
             
-        caminho_completo = os.path.join(self.model_dir, nome_arquivo)
-        self.model.save(caminho_completo)
-        print(f"Modelo salvo com sucesso em: {caminho_completo}.zip")
+            recompensa_total = 0.0
+            passos_do_episodio = 0
+            done = False
 
-    def carregar_modelo(self, nome_arquivo: str = "agente_ppo_logistica", env_atual: gym.Env = None):
-        """
-        Carrega os pesos do modelo. Permite associar um novo ambiente 
-        caso o layout ou o grid tenham mudado no frontend.
-        """
-        if nome_arquivo.endswith(".zip"):
-            nome_arquivo = nome_arquivo[:-4]
+            while not done:
+                prox_obs, reward, terminated, truncated, info = self.env.step(acao)
+                prox_estado = int(prox_obs)
+                prox_acao = self.escolher_acao(prox_estado, epsilon)
+
+                # Atualização SARSA
+                q_atual = self.Q[estado, acao]
+                q_proximo = self.Q[prox_estado, prox_acao]
+                self.Q[estado, acao] = q_atual + learning_rate * (reward + gamma * q_proximo - q_atual)
+
+                estado = prox_estado
+                acao = prox_acao
+                recompensa_total += reward
+                passos_do_episodio += 1
+                done = terminated or truncated
+
+            # Decaimento do epsilon
+            epsilon = max(epsilon_min, epsilon * decaimento_epsilon)
+            historico_recompensas.append(recompensa_total)
+
+            # Notifica o callback do progresso no Streamlit
+            if callback is not None:
+                callback.registrar_episodio(ep, total_episodios, recompensa_total, passos_do_episodio)
+                if callback.should_stop():
+                    break
+
+        return historico_recompensas
+
+    def predict(self, estado: int, deterministic: bool = True) -> tuple[int, None]:
+        """Prediz a melhor ação com base na Q-table atualizada (usado na inferência)."""
+        q_valores = self.Q[estado]
+        max_q = np.max(q_valores)
+        acoes_candidatas = np.where(q_valores == max_q)[0]
+        return int(random.choice(acoes_candidatas)), None
+
+    def salvar_modelo(self, caminho_completo: str = "data/models/agente_sarsa.npy") -> None:
+        os.makedirs(os.path.dirname(caminho_completo), exist_ok=True)
+        np.save(caminho_completo, self.Q)
+        print(f"Modelo SARSA salvo com sucesso em: {caminho_completo}")
+
+    def carregar_modelo(self, caminho_completo: str = "data/models/agente_sarsa.npy") -> None:
+        if not caminho_completo.endswith(".npy"):
+            if caminho_completo.endswith(".zip"):
+                caminho_completo = caminho_completo[:-4]
+            caminho_completo = caminho_completo + ".npy"
             
-        caminho_completo = os.path.join(self.model_dir, nome_arquivo)
-        
-        # Se um novo env foi passado, prioriza ele; caso contrário usa o interno
-        ambiente_alvo = env_atual if env_atual is not None else self.env
-        
-        self.model = PPO.load(caminho_completo, env=ambiente_alvo)
-        if env_atual:
-            self.env = env_atual
-            
-        print(f"Modelo carregado de: {caminho_completo}.zip")
-        return self.model
+        self.Q = np.load(caminho_completo)
+        print(f"Modelo SARSA carregado com sucesso de: {caminho_completo}")
