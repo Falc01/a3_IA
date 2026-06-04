@@ -84,34 +84,6 @@ def _init_state():
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
-
-def _build_reward_chart(rewards: list[float]) -> go.Figure:
-    ep = list(range(1, len(rewards) + 1))
-    # Média móvel
-    window = max(1, len(rewards) // 10)
-    smoothed = np.convolve(rewards, np.ones(window) / window, mode="valid").tolist()
-    ep_smooth = ep[window - 1:]
-
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=ep, y=rewards, mode="lines",
-                             line=dict(color="#4f46e5", width=1),
-                             name="Recompensa", opacity=0.4))
-    fig.add_trace(go.Scatter(x=ep_smooth, y=smoothed, mode="lines",
-                             line=dict(color="#a78bfa", width=2.5),
-                             name="Média móvel"))
-    fig.update_layout(
-        paper_bgcolor="#0e1117", plot_bgcolor="#1e2130",
-        margin=dict(l=30, r=10, t=30, b=30),
-        height=240,
-        legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(color="#cbd5e1")),
-        xaxis=dict(color="#64748b", title="Episódio", gridcolor="#2d3561"),
-        yaxis=dict(color="#64748b", title="Recompensa", gridcolor="#2d3561"),
-        title=dict(text="📈 Curva de Aprendizado (Recompensa por Episódio)",
-                   font=dict(color="#c7d2fe", size=13)),
-    )
-    return fig
-
-
 def _run_inference(model, config: RotaConfig) -> tuple[list, dict]:
     """Executa 1 episódio de inferência e devolve a rota + métricas."""
     env = RotaEnv(config)
